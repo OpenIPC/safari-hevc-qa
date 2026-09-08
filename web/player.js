@@ -139,9 +139,19 @@
       if (window.__done) return;
       if (!sb || ms.readyState !== 'open') return;
       if (sb.updating) { setTimeout(pump, 20); return; }
-      // Don't overfill the SourceBuffer while the video is paused (autoplay not
-      // yet granted): a full buffer throws QuotaExceeded and masks the real
-      // playback. Hold until it drains, which it does once playback starts.
+      // Evict already-played data, the way a real MSE player does. Safari's
+      // SourceBuffer quota is small, and this stream is large (all-keyframe
+      // 2592x1520), so without eviction the buffer fills after a few seconds and
+      // appends quietly stop — which looked like a decode stall but was not.
+      try {
+        var b0 = video.buffered;
+        if (b0.length && b0.start(0) < video.currentTime - 4) {
+          sb.remove(0, video.currentTime - 2);
+          setTimeout(pump, 30); return;   // remove() is async (its own updateend)
+        }
+      } catch (e) {}
+      // Don't overfill ahead while the video is paused (autoplay not yet
+      // granted): hold until it drains, which it does once playback starts.
       if (bufferedAhead() > 8) { setTimeout(pump, 100); return; }
       appendOnce(f.data, function () { R.appended++; fragIdx++; render(); pump(); });
     }, wait);
