@@ -1,0 +1,76 @@
+name: Safari HEVC MSE
+
+# Real Safari (VideoToolbox HEVC) on a GitHub-hosted macOS runner replays a
+# prerecorded H.265 Main / MSE stream captured from an OpenIPC/majestic camera,
+# and reports whether the decode is clean or reproduces the flash/black-frame of
+# OpenIPC/majestic-webui#335. A Linux box with Chrome cannot exercise this path.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      params:
+        description: "query string for the harness (e.g. burst=1, noreinit=1, ms=30000)"
+        required: false
+        default: ""
+
+jobs:
+  safari:
+    # macos-14 / macos-15 are Apple-silicon runners with a recent Safari.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Safari version
+        run: |
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+          sw_vers || true
+
+      - name: Enable Safari WebDriver
+        run: sudo safaridriver --enable
+
+      - name: Install Selenium (venv, robust across runner images)
+        run: |
+          python3 -m venv venv
+          ./venv/bin/python -m pip install --upgrade pip
+          ./venv/bin/python -m pip install 'selenium>=4.20'
+
+      - name: Serve the harness
+        run: |
+          cd web
+          python3 -m http.server 8000 &
+          echo $! > /tmp/httpd.pid
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:8000/mse-hevc.html >/dev/null && break || sleep 0.5
+          done
+
+      - name: Run Safari MSE playback
+        id: run
+        run: |
+          PARAMS="${{ github.event.inputs.params }}"
+          URL="http://localhost:8000/mse-hevc.html"
+          [ -n "$PARAMS" ] && URL="$URL?$PARAMS"
+          echo "URL=$URL"
+          ./venv/bin/python run.py "$URL" 120
+        # A reproduced defect exits 1: surface it as the job outcome, but still
+        # upload the trace. `continue-on-error` lets the artifact step run.
+        continue-on-error: true
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.os }}
+          path: result.json
+          if-no-files-found: warn
+
+      - name: Reflect verdict as job status
+        run: |
+          test "${{ steps.run.outcome }}" = "success" \
+            && echo "Clean playback on ${{ matrix.os }}." \
+            || { echo "Defect reproduced (or harness issue) on ${{ matrix.os }} — see log/artifact."; exit 1; }

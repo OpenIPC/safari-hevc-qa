@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Safari HEVC MSE harness</title>
+<style>
+  html,body{margin:0;background:#111;color:#ddd;font:13px system-ui,sans-serif}
+  #v{width:100%;max-width:720px;background:#000;display:block}
+  #c{display:none}
+  pre{white-space:pre-wrap;word-break:break-word;padding:8px}
+  .k{color:#8bd}
+</style>
+</head>
+<body>
+<!-- The <video> plays a prerecorded fMP4 HEVC (H.265 Main) stream, captured from
+     an OpenIPC/majestic camera's /ws/video MSE endpoint, replayed into a
+     MediaSource exactly as the WebUI's Live page feeds it. The point is to run
+     this in REAL Safari (VideoToolbox HEVC decode) on a GitHub-hosted macOS
+     runner, where a Linux box with Chrome cannot go, and measure whether the
+     decode is healthy or flashes/black-frames the way OpenIPC/majestic-webui#335
+     reports. window.__result carries the verdict for the WebDriver runner. -->
+<video id="v" muted autoplay playsinline></video>
+<canvas id="c"></canvas>
+<pre id="log">loading…</pre>
+<script src="player.js"></script>
+</body>
+</html>
