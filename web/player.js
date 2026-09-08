@@ -27,8 +27,8 @@
   var R = {
     ua: navigator.userAgent, codec: null, paced: paced, reinit: reinit,
     fragments: 0, appended: 0, decodeErrors: 0, errorCodes: [], reinits: 0,
-    blackFrames: 0, blackEvents: 0, stalls: 0, timeAdvances: 0,
-    endedClean: false, maxCurrentTime: 0, playedSeconds: 0,
+    blackFrames: 0, blackEvents: 0, stalls: 0, stallFreezes: 0, timeAdvances: 0,
+    streamSeconds: 0, endedClean: false, maxCurrentTime: 0, playedSeconds: 0,
     firstErrorAtSec: null, mseSupported: null, canPlayType: null,
     samples: [], note: '', reproduced: null
   };
@@ -71,6 +71,7 @@
       frags.push({ data: buf.slice(f.offset, f.offset + f.length), arrivalMs: f.arrivalMs, key: !!f.key });
       if (f.key) keyIdx.push(i);
     });
+    R.streamSeconds = frags.length ? frags[frags.length - 1].arrivalMs / 1000 : 0;
     start();
   }).catch(function (e) { note('load-fail:' + e); finish(); });
 
@@ -190,16 +191,46 @@
     }, 33);
     R._sampler = sampler;
 
+    // Stall watchdog: the reported fault shows on Safari as the SourceBuffer
+    // going quiet (updateend stops) with NO video.error, so currentTime simply
+    // freezes. Detect a freeze while the video should be playing and — like the
+    // WebUI's player does on a stall — rebuild the MediaSource from the next
+    // keyframe. That rebuild is the black-then-video *flash* of #335; each one is
+    // counted so a periodic stall shows as a train of them rather than one dead
+    // player.
+    var lastAdvT = 0, lastAdvWall = performance.now();
+    var watchdog = setInterval(function () {
+      if (window.__done) return;
+      var t = video.currentTime, now = performance.now();
+      if (t > lastAdvT + 0.02) { lastAdvT = t; lastAdvWall = now; return; }
+      if (video.paused || video.ended) { lastAdvWall = now; return; }
+      // Genuinely out of data at the very end is not a stall.
+      if (fragIdx >= frags.length && bufferedAhead() < 0.1) { lastAdvWall = now; return; }
+      if (now - lastAdvWall > 1500) {
+        R.stallFreezes++;
+        note('STALL@' + t.toFixed(2) + ' appended=' + R.appended + ' ahead=' + bufferedAhead().toFixed(1));
+        lastAdvWall = now;
+        if (reinit && !window.__done) {
+          R.reinits++;
+          try { URL.revokeObjectURL(video.src); } catch (e) {}
+          setupMS(nextKeyFrom(fragIdx));
+        }
+      }
+    }, 400);
+    R._watchdog = watchdog;
+
     setupMS(0);
   }
 
   function finish() {
     if (window.__done) return;
     if (R._sampler) clearInterval(R._sampler);
+    if (R._watchdog) clearInterval(R._watchdog);
     R.playedSeconds = R.maxCurrentTime;
-    // Reproduced iff Safari faulted the decode or the picture kept going black.
-    R.reproduced = (R.decodeErrors > 0) || (R.blackEvents >= 3);
-    delete R._sampler;
+    // Reproduced iff Safari faulted the decode, kept going black, or froze the
+    // MSE pipeline before the stream was through.
+    R.reproduced = (R.decodeErrors > 0) || (R.blackEvents >= 3) || (R.stallFreezes >= 1);
+    delete R._sampler; delete R._watchdog;
     render();
     window.__result = R;   // publish before flipping __done so a poller sees both
     window.__done = true;

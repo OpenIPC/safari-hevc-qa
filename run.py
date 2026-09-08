@@ -113,9 +113,14 @@ def main():
               % (codec, result.get("canPlayType"), mse_ok))
         return 1
 
+    freezes = result.get("stallFreezes", 0)
+    stream_s = result.get("streamSeconds", 0) or 0
+
     if reproduced:
-        print("\nRESULT: REPRODUCED — %d decode error(s) %s, %d black event(s), "
-              "played %.1fs of stream." % (errs, result.get("errorCodes"), blk, played))
+        print("\nRESULT: REPRODUCED — %d decode error(s) %s, %d MSE freeze/rebuild(s), "
+              "%d black event(s); playback reached %.1fs of a %.0fs stream before "
+              "the pipeline stalled." % (errs, result.get("errorCodes"), freezes, blk,
+                                         played, stream_s))
         return 1
 
     # Supported, no error — but did it actually play? If not, the run proves
@@ -126,9 +131,16 @@ def main():
               "not a verdict on the stream." % (played, appended, total))
         return 2
 
-    print("\nRESULT: clean — played %.1fs, appended %d/%d, no decode errors, "
-          "%d black event(s). This stream does not reproduce the fault on this "
-          "Safari." % (played, appended, total, blk))
+    # Advanced, no error/freeze flagged, but did not get through the stream.
+    if stream_s and played < 0.8 * stream_s:
+        print("\nRESULT: STALLED — played only %.1fs of a %.0fs stream (appended "
+              "%d/%d) with no decode error. The MSE pipeline stopped early on this "
+              "Safari." % (played, stream_s, appended, total))
+        return 1
+
+    print("\nRESULT: clean — played %.1fs of %.0fs, appended %d/%d, no decode "
+          "errors, no freezes, %d black event(s). This stream plays through on "
+          "this Safari." % (played, stream_s, appended, total, blk))
     return 0
 
 
