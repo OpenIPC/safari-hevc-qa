@@ -19,7 +19,8 @@
 <div id="stage"><video id="v" muted autoplay playsinline></video></div>
 <canvas id="c"></canvas>
 <pre id="log">loading…</pre>
-<script src="preview.js"></script>
+<!-- webui-driver.js loads the player itself (?player=preview.js by default, or
+     preview-unfixed.js for the before/after control), then drives it. -->
 <script src="webui-driver.js"></script>
 </body>
 </html>

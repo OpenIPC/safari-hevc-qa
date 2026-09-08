@@ -11,6 +11,24 @@
   var q = new URLSearchParams(location.search);
   var maxMs = +(q.get('ms') || 25000);
   var base = q.get('stream') || 'stream';
+  // Which player build to test: preview.js (with the #411 fix) by default, or
+  // preview-unfixed.js (master, per-frame appends) for the before/after control.
+  var playerSrc = (q.get('player') || 'preview.js').replace(/[^A-Za-z0-9._-]/g, '');
+  if (!window.MajesticVideo) {
+    var s = document.createElement('script');
+    s.src = playerSrc;
+    s.onload = main;
+    s.onerror = function () {
+      document.getElementById('log').textContent = 'failed to load ' + playerSrc;
+      window.__result = { note: 'player-load-fail', reproduced: null }; window.__done = true;
+      document.title = 'DONE';
+    };
+    document.head.appendChild(s);
+  } else {
+    main();
+  }
+
+  function main() {
 
   var R = {
     ua: navigator.userAgent, codec: null, states: [], reconnects: 0,
@@ -152,4 +170,5 @@
     note('load-fail:' + e);
     window.__result = R; window.__done = true; document.title = 'DONE';
   });
+  }
 })();
