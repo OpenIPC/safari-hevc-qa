@@ -80,6 +80,25 @@ anywhere HEVC MSE is supported; on Linux you can confirm the replay works with
 `OpenIPC/chrome-hevc-qa`. Chrome playing it clean only proves the harness is
 sound — it says nothing about Safari, which is the whole point of the macOS job.
 
+## What it found (first runs, Safari 26.6)
+
+Running the committed recording — H.265 Main, 2592×1520, ~2.2 Mbit/s,
+all-keyframe (GOP 1 s) — on GitHub's macOS runners:
+
+| runner | macOS / Safari | result |
+| --- | --- | --- |
+| `macos-15` | 15.7.9 / 26.6.1 | HEVC MSE **supported**, but the SourceBuffer **freezes after ~2.8 s** with **no `video.error`** — `currentTime` stops, `updateend` stops — and rebuilding it (as the WebUI does) stalls again within a second. Six freeze/rebuild cycles in the run: the reported *flash*. |
+| `macos-14` | 14.8.9 / 26.6 | HEVC MSE **not supported at all**: `canPlayType` empty, `MediaSource.isTypeSupported` false, `addSourceBuffer` throws `NotSupportedError`. |
+
+For contrast, Chrome + VA-API (via `OpenIPC/chrome-hevc-qa`) plays the **same
+recording** end to end — 421/421 fragments, 22 s, zero freezes, zero decode
+errors. So the fault is Safari's MSE HEVC path, not the camera's stream (which is
+conformant H.265 Main) and not the harness.
+
+Because a reproduced fault exits non-zero, the macOS jobs are **red while the bug
+is present** and will go **green if a future Safari plays the stream through** —
+i.e. this doubles as a regression watch.
+
 ## Reading the result
 
 - **`reproduced: true`** with `errorCodes: [3, …]` — Safari's decoder rejected the
