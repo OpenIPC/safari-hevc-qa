@@ -112,6 +112,18 @@ The WebUI fix is `OpenIPC/majestic-webui#411`: for HEVC, batch ~5 fragments per
 `appendBuffer` (H.264 left per-frame for its low-latency path). Use `chunk=` /
 `gop=` here to re-confirm or to size the batch for a new Safari.
 
+### Before/after with the real WebUI player
+
+`webui.html` runs the **actual `preview.js`** (`window.MajesticVideo`) against a
+stubbed WebSocket replaying the recording, so the shipped code — its queue, its
+coalescing, its reconnect logic — is what Safari runs. Same harness, same stream,
+same macOS-15 Safari 26.6.1, only the player build differs:
+
+| `?page=webui.html&player=` | result |
+| --- | --- |
+| `preview-unfixed.js` (master, per-frame) | plays, then **stalls at 3.6 s** |
+| `preview.js` (the #411 fix, default) | **full 22 s, 0 rebuilds, clean** |
+
 Because a reproduced fault exits non-zero, the macOS jobs are **red while the bug
 is present** and will go **green if a future Safari plays the stream through** —
 i.e. this doubles as a regression watch.
