@@ -23,9 +23,12 @@
   var reinit = !q.get('noreinit');
   var maxMs = +(q.get('ms') || 25000);
   var base = q.get('stream') || 'stream';
+  var chunkN = Math.max(1, +(q.get('chunk') || 1));  // fragments per appendBuffer
+  var gopChunk = !!q.get('gop');                      // or coalesce a whole GOP
 
   var R = {
     ua: navigator.userAgent, codec: null, paced: paced, reinit: reinit,
+    chunk: gopChunk ? 'gop' : chunkN,
     fragments: 0, appended: 0, decodeErrors: 0, errorCodes: [], reinits: 0,
     blackFrames: 0, blackEvents: 0, stalls: 0, stallFreezes: 0, timeAdvances: 0,
     streamSeconds: 0, endedClean: false, maxCurrentTime: 0, playedSeconds: 0,
@@ -131,19 +134,37 @@
     catch (e) { note('append-throw:' + e); sb.removeEventListener('updateend', onEnd); setTimeout(cb, 40); }
   }
 
+  // Coalesce the next `chunk` fragments (bounded by the stream end) into one
+  // buffer. chunk=1 is the WebUI's current one-appendBuffer-per-frame behaviour;
+  // a larger chunk — or gop=1, which coalesces a whole GOP up to the next
+  // keyframe — is the candidate fix for Safari wedging on high-frequency appends.
+  function nextChunk() {
+    var start = fragIdx, n = 0, total = 0;
+    while (fragIdx + n < frags.length) {
+      total += frags[fragIdx + n].data.byteLength;
+      n++;
+      if (gopChunk) { if (fragIdx + n >= frags.length || frags[fragIdx + n].key) break; }
+      else if (n >= chunkN) break;
+    }
+    var out = new Uint8Array(total), off = 0;
+    for (var i = 0; i < n; i++) {
+      out.set(new Uint8Array(frags[start + i].data), off);
+      off += frags[start + i].data.byteLength;
+    }
+    return { data: out.buffer, n: n, lastArrival: frags[start + n - 1].arrivalMs };
+  }
+
   function pump() {
     if (window.__done) return;
     if (fragIdx >= frags.length) { try { ms.endOfStream(); } catch (e) {} return; }
-    var f = frags[fragIdx];
-    var wait = paced ? Math.max(0, f.arrivalMs - (performance.now() - playStart)) : 0;
+    var ch = nextChunk();
+    var wait = paced ? Math.max(0, ch.lastArrival - (performance.now() - playStart)) : 0;
     setTimeout(function () {
       if (window.__done) return;
       if (!sb || ms.readyState !== 'open') return;
       if (sb.updating) { setTimeout(pump, 20); return; }
-      // Evict already-played data, the way a real MSE player does. Safari's
-      // SourceBuffer quota is small, and this stream is large (all-keyframe
-      // 2592x1520), so without eviction the buffer fills after a few seconds and
-      // appends quietly stop — which looked like a decode stall but was not.
+      // Evict already-played data, the way a real MSE player does — Safari's
+      // SourceBuffer quota is small and this stream is large.
       try {
         var b0 = video.buffered;
         if (b0.length && b0.start(0) < video.currentTime - 4) {
@@ -154,7 +175,7 @@
       // Don't overfill ahead while the video is paused (autoplay not yet
       // granted): hold until it drains, which it does once playback starts.
       if (bufferedAhead() > 8) { setTimeout(pump, 100); return; }
-      appendOnce(f.data, function () { R.appended++; fragIdx++; render(); pump(); });
+      appendOnce(ch.data, function () { R.appended += ch.n; fragIdx += ch.n; render(); pump(); });
     }, wait);
   }
 
