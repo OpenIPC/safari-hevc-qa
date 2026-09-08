@@ -94,6 +94,7 @@ def main():
 
     codec_string = None
     timescale = None
+    text_init = None
     init = None
     manifest = []
     blob = bytearray()
@@ -109,7 +110,10 @@ def main():
             break
         if op == 1:
             try:
-                codec_string = json.loads(pl.decode()).get("codecString", codec_string)
+                j = json.loads(pl.decode())
+                codec_string = j.get("codecString", codec_string)
+                if j.get("type") == "init" and text_init is None:
+                    text_init = pl.decode()   # kept verbatim to replay to onInit
             except Exception:
                 pass
             continue
@@ -162,7 +166,7 @@ def main():
     with open(os.path.join(outdir, "stream.bin"), "wb") as f:
         f.write(out)
     hdr = {"codecString": codec_string, "mime": 'video/mp4; codecs="%s"' % codec_string,
-           "timescale": timescale, "initLength": len(init), "fragments": frags,
+           "timescale": timescale, "initLength": len(init), "fragments": frags, "textInit": text_init,
            "source": "%s /ws/video?stream=%s (no lens)" % (host, stream)}
     with open(os.path.join(outdir, "stream.json"), "w") as f:
         json.dump(hdr, f)

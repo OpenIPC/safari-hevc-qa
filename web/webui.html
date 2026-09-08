@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebUI preview.js on Safari</title>
+<style>
+  html,body{margin:0;background:#111;color:#ddd;font:13px system-ui,sans-serif}
+  #stage video{width:100%;max-width:720px;background:#000;display:block}
+  #c{display:none}
+  pre{white-space:pre-wrap;word-break:break-word;padding:8px}
+</style>
+</head>
+<body>
+<!-- Drives the REAL majestic-webui MSE player (preview.js, window.MajesticVideo)
+     against a stubbed WebSocket that replays a recorded /ws/video HEVC stream, so
+     the shipped code — not a reimplementation — is what runs in Safari on the
+     macOS runner. Confirms the majestic-webui#411 append-coalescing fix. -->
+<div id="stage"><video id="v" muted autoplay playsinline></video></div>
+<canvas id="c"></canvas>
+<pre id="log">loading…</pre>
+<script src="preview.js"></script>
+<script src="webui-driver.js"></script>
+</body>
+</html>
