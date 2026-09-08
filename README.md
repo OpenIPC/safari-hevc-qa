@@ -95,6 +95,23 @@ recording** end to end — 421/421 fragments, 22 s, zero freezes, zero decode
 errors. So the fault is Safari's MSE HEVC path, not the camera's stream (which is
 conformant H.265 Main) and not the harness.
 
+### Root cause and fix (isolated with this harness)
+
+The trigger is **append frequency**, not any stream property: the WebUI appended
+one fMP4 fragment per `appendBuffer` (~20–30/s, one per frame), and Safari's
+SourceBuffer wedges under that. Coalescing a handful of fragments into one append
+fixes it — on `macos-15` the modes compare directly:
+
+| `?params=` | Safari macOS 15 |
+| --- | --- |
+| `chunk=1` (per-frame, the old behaviour) | stalls at ~2.8 s, 6 flash cycles |
+| `chunk=5` | plays the full 22 s, 0 stalls |
+| `gop=1` (coalesce a whole GOP) | plays the full 22 s, 0 stalls |
+
+The WebUI fix is `OpenIPC/majestic-webui#411`: for HEVC, batch ~5 fragments per
+`appendBuffer` (H.264 left per-frame for its low-latency path). Use `chunk=` /
+`gop=` here to re-confirm or to size the batch for a new Safari.
+
 Because a reproduced fault exits non-zero, the macOS jobs are **red while the bug
 is present** and will go **green if a future Safari plays the stream through** —
 i.e. this doubles as a regression watch.
