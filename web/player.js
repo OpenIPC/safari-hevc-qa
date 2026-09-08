@@ -90,6 +90,24 @@
     return frags.length;
   }
 
+  function bufferedAhead() {
+    try {
+      var b = video.buffered;
+      if (b && b.length) return b.end(b.length - 1) - video.currentTime;
+    } catch (e) {}
+    return 0;
+  }
+
+  // Safari allows muted autoplay, but under WebDriver a real user gesture is the
+  // reliable trigger, so run.py clicks the page and this plays on that click too.
+  window.__play = function () {
+    try {
+      video.muted = true;
+      var p = video.play();
+      if (p && p.catch) p.catch(function (e) { R.playTries = (R.playTries || 0) + 1; });
+    } catch (e) {}
+  };
+
   function setupMS(fromIdx) {
     fragIdx = fromIdx;
     ms = new MediaSource();
@@ -99,10 +117,7 @@
       catch (e) { note('addSourceBuffer-fail:' + e); return finish(); }
       appendOnce(initSeg, function () {
         playStart = performance.now();
-        // play() only once src is set and init is in, so it is not aborted by
-        // the MediaSource load — muted so Safari's autoplay policy allows it.
-        video.muted = true;
-        video.play().catch(function (e) { note('play-reject:' + e); });
+        window.__play();  // and again on the WebDriver click / canplay below
         pump();
       });
     }, { once: true });
@@ -124,6 +139,10 @@
       if (window.__done) return;
       if (!sb || ms.readyState !== 'open') return;
       if (sb.updating) { setTimeout(pump, 20); return; }
+      // Don't overfill the SourceBuffer while the video is paused (autoplay not
+      // yet granted): a full buffer throws QuotaExceeded and masks the real
+      // playback. Hold until it drains, which it does once playback starts.
+      if (bufferedAhead() > 8) { setTimeout(pump, 100); return; }
       appendOnce(f.data, function () { R.appended++; fragIdx++; render(); pump(); });
     }, wait);
   }
@@ -143,6 +162,8 @@
     });
     video.addEventListener('waiting', function () { R.stalls++; });
     video.addEventListener('ended', function () { R.endedClean = true; });
+    video.addEventListener('canplay', window.__play);
+    document.addEventListener('click', window.__play, true);
 
     var lastBlack = false;
     var sampler = setInterval(function () {

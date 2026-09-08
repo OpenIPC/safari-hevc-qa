@@ -43,12 +43,17 @@ def main():
         driver.quit()
         return 2
 
-    # Muted autoplay is allowed by Safari, but nudge it in case automation is
-    # stricter — harmless if the page already started.
+    # A real user gesture is the reliable autoplay trigger under WebDriver: click
+    # the video (the page plays on click). Muted, so the policy allows it.
     try:
-        driver.execute_script(
-            "var v=document.getElementById('v');"
-            "if(v){v.muted=true;var p=v.play&&v.play();if(p&&p.catch)p.catch(function(){});}")
+        from selenium.webdriver.common.by import By
+        time.sleep(1.0)
+        el = driver.find_element(By.ID, "v")
+        el.click()
+    except Exception:
+        pass
+    try:
+        driver.execute_script("window.__play && window.__play();")
     except Exception:
         pass
 
@@ -94,13 +99,18 @@ def main():
 
     codec = result.get("codec")
     reproduced = result.get("reproduced")
-    played = result.get("playedSeconds", 0)
+    played = result.get("playedSeconds", 0) or 0
     errs = result.get("decodeErrors", 0)
     blk = result.get("blackEvents", 0)
+    appended = result.get("appended", 0)
+    total = result.get("fragments", 0)
+    mse_ok = result.get("mseTypeSupported")
 
-    if result.get("canPlayType") == "" and result.get("mseTypeSupported") is False:
-        print("\nRESULT: Safari reports it cannot play %s at all "
-              "(canPlayType empty, MSE type unsupported)." % codec)
+    # A genuine finding: this Safari cannot decode HEVC in MSE at all.
+    if mse_ok is False or result.get("canPlayType") == "":
+        print("\nRESULT: unsupported — this Safari cannot play %s in MSE "
+              "(canPlayType=%r, MediaSource.isTypeSupported=%r)."
+              % (codec, result.get("canPlayType"), mse_ok))
         return 1
 
     if reproduced:
@@ -108,8 +118,17 @@ def main():
               "played %.1fs of stream." % (errs, result.get("errorCodes"), blk, played))
         return 1
 
-    print("\nRESULT: clean — no decode errors, %d black event(s), played %.1fs. "
-          "This stream does not reproduce the fault on this Safari." % (blk, played))
+    # Supported, no error — but did it actually play? If not, the run proves
+    # nothing (autoplay refused, page never advanced): inconclusive, not clean.
+    if played < 2.0:
+        print("\nRESULT: INCONCLUSIVE — HEVC MSE is supported but playback never "
+              "advanced (played %.2fs, appended %d/%d). Autoplay/harness issue, "
+              "not a verdict on the stream." % (played, appended, total))
+        return 2
+
+    print("\nRESULT: clean — played %.1fs, appended %d/%d, no decode errors, "
+          "%d black event(s). This stream does not reproduce the fault on this "
+          "Safari." % (played, appended, total, blk))
     return 0
 
 
