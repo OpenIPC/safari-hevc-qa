@@ -18,6 +18,7 @@ on:
         options:
           - mse-hevc.html
           - webui.html
+          - zoom-ab.html
       params:
         description: "query string for the harness (e.g. burst=1, chunk=5, gop=1, ms=30000)"
         required: false
