@@ -53,8 +53,8 @@ def main():
         r, deadline = None, time.time() + TIMEOUT
         while time.time() < deadline:
             try:
-                if driver.execute_script("return window.__done === true;"):
-                    r = driver.execute_script("return window.__result;")
+                r = driver.execute_script("return window.__result || null;")
+                if r:
                     break
             except Exception:
                 pass
