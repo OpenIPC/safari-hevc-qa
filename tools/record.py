@@ -11,8 +11,9 @@ fMP4 init segment and every moof+mdat fragment, and writes a replayable pair:
 Usage:
   tools/record.py <host> [stream=0] [seconds=22] [user=root] [pass=123456] [outdir=web]
 
-The camera used for the committed recording has no lens, so its picture carries
-nothing private — check that before recording and publishing another camera.
+The camera used for the committed recording had no lens at the time, so its
+picture carried nothing private. It has since been fitted with one. Look at a
+snapshot before recording and publishing from ANY camera, that one included.
 """
 import base64
 import json
