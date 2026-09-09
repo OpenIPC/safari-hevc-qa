@@ -153,3 +153,18 @@ continuous `drawImage` (readback ruled out), this shows the residual flicker is
 **not** in any code path the recorded replay exercises. It correlates with the
 **live stream's real-time timing and/or the reporter's device**, which a
 deterministic recorded replay on a CI runner cannot reproduce.
+
+### The residual was a layout reflow, not decode (#335, iOS/4:3)
+
+Driving the real Live page (above) with `?stream=stream-43&stage=390x664&resizeAt=1200`
+— a **4:3** clip in a **portrait** stage, the stage grown at ~1.25 s the way iOS
+Safari's URL-bar collapse grows the viewport — reflows the picture 885×664 →
+1000×750 on **3/4** Safari loads, with **zero black frames**. The same with the
+16:9-ish `stream` clip reflows **0/4** (width-driven, so a height change doesn't
+move it). So the residual "flicker" is a **layout reflow**, aspect-specific, and
+Live-only. Cause: `#page-live { height: 100dvh }` tracked the dynamic viewport;
+the fix (`OpenIPC/majestic-webui#417`) uses the large viewport so the URL-bar
+collapse doesn't grow the stage. The no-resize baseline is clean 4/4 — the fix's
+behaviour. (The iOS URL bar itself can't be driven on a desktop-Safari runner, so
+the mechanism is shown by inducing the stage grow the dynamic viewport would have
+caused.)
