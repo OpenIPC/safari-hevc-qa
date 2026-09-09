@@ -135,3 +135,21 @@ i.e. this doubles as a regression watch.
 - **`reproduced: false`, played through** — this stream decodes cleanly on this
   Safari version. That narrows the trigger (a different resolution, frame rate,
   or a regression since the recording) rather than clearing it.
+
+## Live-page startup reproduction (#335 residual)
+
+`web/live/livepage.html` runs the **real Live page** — `p/player.cgi`'s markup and
+`live.cgi`'s actual scripts (`preview-page.js`, the transport chain, the
+two-element swap, `preview-zoom`/`adapt`/`stats`/`video-check`/`health`) — over a
+stubbed camera (`web/live/live-stub.js`: main.js helpers, a captured
+`config.json`, empty sources, MSE transport, the recorded `/ws/video` replay), so
+`preview-page.js` runs its true startup on real Safari. `run-live.py` reloads it N
+times (the residual is intermittent) and counts a black frame *after* the first
+paint.
+
+Result on Safari 26.6.1 (macos-15), 16 reloads: **16/16 painted (~350 ms), zero
+flickers.** With the `zoom-ab` A/B (resize ruled out) and the sampler's own
+continuous `drawImage` (readback ruled out), this shows the residual flicker is
+**not** in any code path the recorded replay exercises. It correlates with the
+**live stream's real-time timing and/or the reporter's device**, which a
+deterministic recorded replay on a CI runner cannot reproduce.
