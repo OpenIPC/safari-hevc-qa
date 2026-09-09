@@ -1,30 +1,27 @@
-name: Safari Live-page startup
-
-# Drive the REAL Live page (p/player.cgi markup + live.cgi's scripts over a
-# stubbed camera) through its true startup — transport chain, two-element swap,
-# MSE attach/promote — in real Safari, N times, and report how often it flickers
-# after the first frame (OpenIPC/majestic-webui#335 residual, Live-only).
-
+name: Safari Live page
+# ON THIS BRANCH the file name is borrowed so the job can be dispatched
+# before it lands on the default branch: the job is the data-channel check
+# (run-dc.py). The camera's address and the relay are dispatch inputs; the
+# credentials are repository secrets and never appear in a log.
 on:
   workflow_dispatch:
     inputs:
       page:
-        description: "harness page under web/live/"
-        required: false
-        default: "livepage.html"
+        description: "camera URL (http://host:port)"
+        required: true
+        default: ""
       reloads:
-        description: "how many times to reload in Safari"
+        description: "seconds stream mode, space-separated (e.g. '16 1 negotiated')"
         required: false
-        default: "14"
+        default: "16 1 negotiated"
       params:
-        description: "query string (e.g. stream=stream-43&resizeAt=1200&ms=6000)"
+        description: "TURN url (turn:host:3478?transport=udp), or empty"
         required: false
         default: ""
-
 jobs:
-  livepage:
+  datachannel:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Safari version
@@ -36,31 +33,16 @@ jobs:
           python3 -m venv venv
           ./venv/bin/python -m pip install --upgrade pip
           ./venv/bin/python -m pip install 'selenium>=4.20'
-      - name: Serve
+      - name: Drive Safari
+        env:
+          CAMERA_USER: ${{ secrets.CAMERA_USER }}
+          CAMERA_PASS: ${{ secrets.CAMERA_PASS }}
+          TURN_USER: ${{ secrets.TURN_USER }}
+          TURN_PASS: ${{ secrets.TURN_PASS }}
         run: |
-          cd web
-          python3 -m http.server 8000 &
-          for i in $(seq 1 20); do curl -sf http://localhost:8000/live/livepage.html >/dev/null && break || sleep 0.5; done
-      - name: Drive Safari N times
-        id: run
-        continue-on-error: true
-        run: |
-          PAGE="${{ github.event.inputs.page }}"; PAGE="${PAGE:-livepage.html}"
-          N="${{ github.event.inputs.reloads }}"; N="${N:-14}"
-          PARAMS="${{ github.event.inputs.params }}"
-          URL="http://localhost:8000/live/$PAGE"
-          [ -n "$PARAMS" ] && URL="$URL?$PARAMS"
-          echo "URL=$URL"
-          ./venv/bin/python run-live.py "$URL" "$N" 20
-      - name: Upload per-run results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: livepage-${{ github.event.inputs.page }}
-          path: result.json
-          if-no-files-found: warn
-      - name: Reflect verdict
-        run: |
-          test "${{ steps.run.outcome }}" = "success" \
-            && echo "No startup flicker across the loads." \
-            || { echo "Flicker reproduced (or harness issue) — see log/artifact."; exit 1; }
+          set -- ${{ github.event.inputs.reloads }}
+          ICE=""
+          if [ -n "${{ github.event.inputs.params }}" ]; then
+            ICE="[{\"urls\":\"${{ github.event.inputs.params }}\",\"username\":\"$TURN_USER\",\"credential\":\"$TURN_PASS\"}]"
+          fi
+          ./venv/bin/python run-dc.py "${{ github.event.inputs.page }}" "$1" "$2" "$3" "$ICE"
