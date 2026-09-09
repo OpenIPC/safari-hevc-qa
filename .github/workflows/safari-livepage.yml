@@ -1,0 +1,58 @@
+name: Safari Live-page startup
+
+# Drive the REAL Live page (p/player.cgi markup + live.cgi's scripts over a
+# stubbed camera) through its true startup — transport chain, two-element swap,
+# MSE attach/promote — in real Safari, N times, and report how often it flickers
+# after the first frame (OpenIPC/majestic-webui#335 residual, Live-only).
+
+on:
+  workflow_dispatch:
+    inputs:
+      page:
+        description: "harness page under web/live/"
+        required: false
+        default: "livepage.html"
+      reloads:
+        description: "how many times to reload in Safari"
+        required: false
+        default: "14"
+
+jobs:
+  livepage:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Safari version
+        run: defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+      - name: Enable Safari WebDriver
+        run: sudo safaridriver --enable
+      - name: Selenium
+        run: |
+          python3 -m venv venv
+          ./venv/bin/python -m pip install --upgrade pip
+          ./venv/bin/python -m pip install 'selenium>=4.20'
+      - name: Serve
+        run: |
+          cd web
+          python3 -m http.server 8000 &
+          for i in $(seq 1 20); do curl -sf http://localhost:8000/live/livepage.html >/dev/null && break || sleep 0.5; done
+      - name: Drive Safari N times
+        id: run
+        continue-on-error: true
+        run: |
+          PAGE="${{ github.event.inputs.page }}"; PAGE="${PAGE:-livepage.html}"
+          N="${{ github.event.inputs.reloads }}"; N="${N:-14}"
+          ./venv/bin/python run-live.py "http://localhost:8000/live/$PAGE" "$N" 20
+      - name: Upload per-run results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: livepage-${{ github.event.inputs.page }}
+          path: result.json
+          if-no-files-found: warn
+      - name: Reflect verdict
+        run: |
+          test "${{ steps.run.outcome }}" = "success" \
+            && echo "No startup flicker across the loads." \
+            || { echo "Flicker reproduced (or harness issue) — see log/artifact."; exit 1; }
