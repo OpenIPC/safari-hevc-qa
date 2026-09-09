@@ -25,7 +25,11 @@
 
   var _cfg;
   window.mjConfig = function () {
-    if (!_cfg) _cfg = fetch('config.json').then(function (r) { return r.json(); }).catch(function () { return {}; });
+    if (!_cfg) {
+      var sb = new URLSearchParams(location.search).get('stream') || 'stream';
+      var cfgFile = sb === 'stream' ? 'config.json' : 'config-' + sb.replace('stream-', '') + '.json';
+      _cfg = fetch(cfgFile).then(function (r) { return r.json(); }).catch(function () { return {}; });
+    }
     return _cfg;
   };
   window.mjSources = function () { return Promise.resolve([]); };   // one on-board source
@@ -33,9 +37,21 @@
   // Reporter's case: WebRTC present, MSE picked.
   try { localStorage.setItem('mj-transport-pick', 'mse'); } catch (e) {}
 
+  // Initial stage geometry — ?stage=WxH, so a portrait phone (tall/narrow, where
+  // a 4:3 Fill picture is height-driven and a URL-bar height change reflows it)
+  // can be reproduced. Set before the Live scripts lay out.
+  (function () {
+    var s = new URLSearchParams(location.search).get('stage');
+    if (!s) return;
+    var wh = s.split('x'), st = document.getElementById('mj-stage');
+    if (st && wh.length === 2) { st.style.width = (+wh[0]) + 'px'; st.style.height = (+wh[1]) + 'px'; }
+  })();
+
   // --- fake /ws/video: replay the recorded HEVC (init + one fragment/frame) ---
-  var manP = fetch('../stream.json').then(function (r) { return r.json(); });
-  var binP = fetch('../stream.bin').then(function (r) { return r.arrayBuffer(); });
+  // ?stream=NAME picks web/NAME.json / web/NAME.bin (default the 16:9-ish clip).
+  var streamBase = new URLSearchParams(location.search).get('stream') || 'stream';
+  var manP = fetch('../' + streamBase + '.json').then(function (r) { return r.json(); });
+  var binP = fetch('../' + streamBase + '.bin').then(function (r) { return r.arrayBuffer(); });
   var ready = Promise.all([manP, binP]).then(function (res) {
     var man = res[0], buf = res[1];
     return {

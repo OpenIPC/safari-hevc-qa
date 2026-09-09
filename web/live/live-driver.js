@@ -7,13 +7,47 @@
   'use strict';
   var q = new URLSearchParams(location.search);
   var windowMs = +(q.get('ms') || 6000);
+  // Simulate the real page's layout settling: change the stage size once, some
+  // ms after load, the way the viewport/navbar does (a URL-bar collapse grows
+  // the viewport ~1s in). preview-zoom's ResizeObserver then re-lays-out the
+  // picture — the #294-class reflow. Off unless ?resizeAt is given.
+  var resizeAt = +(q.get('resizeAt') || 0);
+  var resizeTo = (q.get('resizeTo') || '900x620').split('x');
+  if (resizeAt > 0) {
+    setTimeout(function () {
+      var st = document.getElementById('mj-stage');
+      if (st) { st.style.width = (+resizeTo[0]) + 'px'; st.style.height = (+resizeTo[1]) + 'px'; }
+    }, resizeAt);
+  }
 
   var R = {
     ua: navigator.userAgent, startedPaint: false, firstPaintMs: null,
     blackEventsAfterPaint: 0, blackFramesAfterPaint: 0, maxLuma: 0,
-    maxCurrentTime: 0, samples: [], note: '', reproduced: null, done: false
+    maxCurrentTime: 0, intrinsic: null, aspect: null,
+    sizeChangesAfterPaint: 0, rectSeq: [], firstRect: null, lastRect: null,
+    samples: [], note: '', reproduced: null, done: false
   };
   window.__progress = R;
+
+  // The on-screen box of the visible picture — a LATE change to it is a layout
+  // reflow (the #294 class: the picture jumps size a second after load), which
+  // reads as a flicker without any black frame. Tracked separately from luma.
+  function visibleRect() {
+    var els = document.querySelectorAll('.mj-stage-media');
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      try {
+        if (getComputedStyle(el).display === 'none') continue;
+        var w = el.videoWidth || el.naturalWidth || el.width || 0;
+        if (!w) continue;
+        var r = el.getBoundingClientRect();
+        if (r.width < 1 || r.height < 1) continue;
+        if (el.videoWidth) { R.intrinsic = el.videoWidth + 'x' + el.videoHeight; R.aspect = +(el.videoWidth / el.videoHeight).toFixed(3); }
+        return { w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.left), y: Math.round(r.top) };
+      } catch (e) {}
+    }
+    return null;
+  }
 
   var probe = document.createElement('canvas');
   probe.width = 48; probe.height = 27;
@@ -52,8 +86,9 @@
   function finish() {
     if (R.done) return;
     clearInterval(iv);
-    // Reproduced = the picture came up and then went black again during startup.
-    R.reproduced = R.startedPaint && R.blackEventsAfterPaint >= 1;
+    // Reproduced = after the picture came up, it either went black again OR its
+    // on-screen size changed (a layout reflow — the #294-class flicker).
+    R.reproduced = R.startedPaint && (R.blackEventsAfterPaint >= 1 || R.sizeChangesAfterPaint >= 1);
     R.done = true;
     window.__result = R;
     document.title = 'DONE';
@@ -66,11 +101,26 @@
   var t0 = performance.now();
   var lastBlack = false;
   var iv = setInterval(function () {
+    var tms = Math.round(performance.now() - t0);
+    var rect = visibleRect();
     var l = maxLuma();
+
+    // Track the picture's on-screen size and flag a change after the first paint.
+    if (rect) {
+      if (!R.firstRect) R.firstRect = rect;
+      if (R.lastRect && (Math.abs(rect.w - R.lastRect.w) > 1 || Math.abs(rect.h - R.lastRect.h) > 1)) {
+        if (R.rectSeq.length < 40) R.rectSeq.push({ t: tms, w: rect.w, h: rect.h, x: rect.x, y: rect.y });
+        if (R.startedPaint) { R.sizeChangesAfterPaint++; R.note += 'resize@' + tms + 'ms->' + rect.w + 'x' + rect.h + ' '; }
+      }
+      R.lastRect = rect;
+    }
+
     if (l === null) return;
     if (l > R.maxLuma) R.maxLuma = l;
-    var tms = Math.round(performance.now() - t0);
-    if (!R.startedPaint && l > 30) { R.startedPaint = true; R.firstPaintMs = tms; }
+    if (!R.startedPaint && l > 30) {
+      R.startedPaint = true; R.firstPaintMs = tms;
+      if (rect) R.rectSeq.push({ t: tms, w: rect.w, h: rect.h, x: rect.x, y: rect.y, paint: true });
+    }
     if (R.samples.length < 400) R.samples.push({ t: tms, luma: +l.toFixed(1) });
     if (R.startedPaint) {
       var isBlack = l < 30;

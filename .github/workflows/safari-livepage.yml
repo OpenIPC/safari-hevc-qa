@@ -16,6 +16,10 @@ on:
         description: "how many times to reload in Safari"
         required: false
         default: "14"
+      params:
+        description: "query string (e.g. stream=stream-43&resizeAt=1200&ms=6000)"
+        required: false
+        default: ""
 
 jobs:
   livepage:
@@ -43,7 +47,11 @@ jobs:
         run: |
           PAGE="${{ github.event.inputs.page }}"; PAGE="${PAGE:-livepage.html}"
           N="${{ github.event.inputs.reloads }}"; N="${N:-14}"
-          ./venv/bin/python run-live.py "http://localhost:8000/live/$PAGE" "$N" 20
+          PARAMS="${{ github.event.inputs.params }}"
+          URL="http://localhost:8000/live/$PAGE"
+          [ -n "$PARAMS" ] && URL="$URL?$PARAMS"
+          echo "URL=$URL"
+          ./venv/bin/python run-live.py "$URL" "$N" 20
       - name: Upload per-run results
         if: always()
         uses: actions/upload-artifact@v4

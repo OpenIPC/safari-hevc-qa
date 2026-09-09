@@ -61,9 +61,11 @@ def main():
             time.sleep(0.4)
         results.append(r)
         if r:
-            print("run %2d: painted=%s firstPaint=%sms blackAfterPaint=%s flicker=%s %s" % (
+            print("run %2d: painted=%s @%sms intrinsic=%s aspect=%s black=%s resize=%s flicker=%s %s" % (
                 k + 1, r.get("startedPaint"), r.get("firstPaintMs"),
-                r.get("blackEventsAfterPaint"), r.get("reproduced"), r.get("note", "")))
+                r.get("intrinsic"), r.get("aspect"),
+                r.get("blackEventsAfterPaint"), r.get("sizeChangesAfterPaint"),
+                r.get("reproduced"), r.get("note", "")))
         else:
             print("run %2d: no result" % (k + 1))
             if k == 0:  # diagnose the first stall in detail
@@ -89,7 +91,11 @@ def main():
 
     painted = sum(1 for r in results if r and r.get("startedPaint"))
     flick = sum(1 for r in results if r and r.get("reproduced"))
-    print("\nAGGREGATE over %d loads: painted %d, startup-flickered %d" % (len(results), painted, flick))
+    blk = sum(1 for r in results if r and (r.get("blackEventsAfterPaint") or 0) >= 1)
+    rsz = sum(1 for r in results if r and (r.get("sizeChangesAfterPaint") or 0) >= 1)
+    asp = next((r.get("aspect") for r in results if r and r.get("aspect")), None)
+    print("\nAGGREGATE over %d loads (aspect %s): painted %d, black-flicker %d, size-reflow %d, any %d"
+          % (len(results), asp, painted, blk, rsz, flick))
     if flick:
         print("RESULT: REPRODUCED — %d/%d Safari loads flickered after the first frame." % (flick, len(results)))
         return 1
