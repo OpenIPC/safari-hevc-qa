@@ -66,6 +66,18 @@ def main():
                 r.get("blackEventsAfterPaint"), r.get("reproduced"), r.get("note", "")))
         else:
             print("run %2d: no result" % (k + 1))
+            if k == 0:  # diagnose the first stall in detail
+                try:
+                    diag = driver.execute_script(
+                        "return {title:document.title, prog:(typeof window.__progress), "
+                        "play:(typeof window.__play), err:(window.__err||[]).slice(0,8), "
+                        "videos:document.querySelectorAll('video').length, "
+                        "media:document.querySelectorAll('.mj-stage-media').length, "
+                        "hasChain:(typeof window.MajesticChain), hasVideo:(typeof window.MajesticVideo), "
+                        "badge:(document.getElementById('mj-badge')||{}).textContent};")
+                    print("   DIAG: " + json.dumps(diag))
+                except Exception as e:  # noqa
+                    print("   DIAG failed: %s" % e)
 
     driver.quit()
 

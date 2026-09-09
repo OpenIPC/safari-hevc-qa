@@ -6,6 +6,15 @@
 (function () {
   'use strict';
 
+  // Capture any error on the page so a headless run can report why it stalled.
+  window.__err = [];
+  window.addEventListener('error', function (e) {
+    try { window.__err.push(String((e && e.message) || e) + ' @ ' + String((e && e.filename) || '') + ':' + ((e && e.lineno) || '')); } catch (x) {}
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    try { window.__err.push('reject: ' + String((e && e.reason && e.reason.message) || (e && e.reason) || e)); } catch (x) {}
+  });
+
   // --- main.js helpers (verbatim) ---
   window.$ = function (n) { return document.querySelector(n); };
   window.$$ = function (n) { return Array.prototype.slice.call(document.querySelectorAll(n)); };
