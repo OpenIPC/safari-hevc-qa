@@ -37,26 +37,33 @@ def main():
     except Exception as e:  # noqa
         print("HARNESS: could not start Safari WebDriver: %s" % e)
         return 2
-    driver.set_script_timeout(SECONDS + 30)
-    driver.get(URL.rstrip("/") + "/login.html")
-    status = driver.execute_async_script(
-        "const [u, p, done] = arguments;"
-        "fetch('/login', {method: 'POST', credentials: 'same-origin',"
-        " headers: {'Content-Type': 'application/x-www-form-urlencoded'},"
-        " body: new URLSearchParams({username: u, password: p}).toString()})"
-        ".then(r => done(r.status), () => done(-1));",
-        os.environ.get("CAMERA_USER", ""), os.environ.get("CAMERA_PASS", ""))
-    print("sign-in: HTTP %s" % status)
-    if status != 200:
-        print("FAIL: sign-in refused")
-        return 1
-    driver.execute_script(probe)
-    out = driver.execute_async_script(
-        "const [s, st, m, ice, done] = arguments;"
-        "window.__dcProbe(s, st, m, {iceServers: ice}).then(done, e => done({error: String(e)}));",
-        SECONDS, STREAM, MODE, ICE)
-    ua = driver.execute_script("return navigator.userAgent")
-    driver.quit()
+    # Whatever happens past this point, the Safari session is closed and a
+    # failure of the harness itself is reported as one, not raised.
+    try:
+        driver.set_script_timeout(SECONDS + 30)
+        driver.get(URL.rstrip("/") + "/login.html")
+        status = driver.execute_async_script(
+            "const [u, p, done] = arguments;"
+            "fetch('/login', {method: 'POST', credentials: 'same-origin',"
+            " headers: {'Content-Type': 'application/x-www-form-urlencoded'},"
+            " body: new URLSearchParams({username: u, password: p}).toString()})"
+            ".then(r => done(r.status), () => done(-1));",
+            os.environ.get("CAMERA_USER", ""), os.environ.get("CAMERA_PASS", ""))
+        print("sign-in: HTTP %s" % status)
+        if status != 200:
+            print("FAIL: sign-in refused")
+            return 1
+        driver.execute_script(probe)
+        out = driver.execute_async_script(
+            "const [s, st, m, ice, done] = arguments;"
+            "window.__dcProbe(s, st, m, {iceServers: ice}).then(done, e => done({error: String(e)}));",
+            SECONDS, STREAM, MODE, ICE)
+        ua = driver.execute_script("return navigator.userAgent")
+    except Exception as e:  # noqa
+        print("HARNESS: %s" % e)
+        return 2
+    finally:
+        driver.quit()
     if not isinstance(out, dict) or "error" in out:
         print("HARNESS: probe failed: %s" % out)
         return 2
