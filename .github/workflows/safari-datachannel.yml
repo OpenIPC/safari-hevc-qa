@@ -1,0 +1,57 @@
+name: Safari data channel
+
+# The camera's video bitstream over an RTCDataChannel, from real Safari on a
+# hosted macOS runner: run-dc.py signs in on the camera's own login page,
+# injects the page probe shared with the Chrome harness (web/dc-probe.js),
+# offers a data-only PeerConnection on the signalling socket, holds every
+# message to the published header, asks for a keyframe halfway and reports.
+# The camera's address and the relay are dispatch inputs; the credentials are
+# repository secrets and never appear in a log.
+
+on:
+  workflow_dispatch:
+    inputs:
+      camera:
+        description: "camera URL (http://host:port), reachable from the runner"
+        required: true
+        default: ""
+      args:
+        description: "seconds stream mode, space-separated (mode: negotiated, dcep or mixed)"
+        required: false
+        default: "16 1 negotiated"
+      turn:
+        description: "TURN url (turn:host:3478?transport=udp) for a camera with no direct UDP path, or empty"
+        required: false
+        default: ""
+
+jobs:
+  datachannel:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Safari version
+        run: defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+      - name: Enable Safari WebDriver
+        run: sudo safaridriver --enable
+      - name: Selenium
+        run: |
+          python3 -m venv venv
+          ./venv/bin/python -m pip install --upgrade pip
+          ./venv/bin/python -m pip install 'selenium>=4.20'
+      - name: Drive Safari
+        env:
+          CAMERA_USER: ${{ secrets.CAMERA_USER }}
+          CAMERA_PASS: ${{ secrets.CAMERA_PASS }}
+          TURN_USER: ${{ secrets.TURN_USER }}
+          TURN_PASS: ${{ secrets.TURN_PASS }}
+          CAMERA: ${{ github.event.inputs.camera }}
+          ARGS: ${{ github.event.inputs.args }}
+          TURN: ${{ github.event.inputs.turn }}
+        run: |
+          set -- $ARGS
+          ICE=""
+          if [ -n "$TURN" ]; then
+            ICE="[{\"urls\":\"$TURN\",\"username\":\"$TURN_USER\",\"credential\":\"$TURN_PASS\"}]"
+          fi
+          ./venv/bin/python run-dc.py "$CAMERA" "$1" "$2" "$3" "$ICE"
