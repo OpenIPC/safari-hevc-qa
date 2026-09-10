@@ -32,12 +32,21 @@ run.py              drives real Safari via safaridriver, prints the verdict
 
 ### The recording
 
-`web/stream.bin` was captured from the `/ws/video` MSE endpoint of the lab camera
-`hi3516ev300-imx335.dlab.torturelabs.com` — **H.265 Main, `hvc1.1.6.L153.B0`,
-2592×1520, 20 fps, all-keyframe GOP of 1 s, ~22 s**. The camera has **no lens**,
-so the picture is a flat sensor field and the recording is safe to publish. It is
-the byte stream the WebUI would hand to `SourceBuffer.appendBuffer`, replayed in
-order and (by default) at the cadence the camera delivered it.
+`web/stream.bin` was captured from the `/ws/video` MSE endpoint of a lab
+camera — **H.265 Main, `hvc1.1.6.L153.B0`, 2592×1520, 20 fps, all-keyframe GOP
+of 1 s, ~22 s**. At the time the camera had **no lens**, so the picture is a
+flat sensor field and the recording is safe to publish. **That camera has since
+been fitted with a lens**, so a fresh recording from it is not: look at a
+snapshot before recording and publishing from any camera. It is the byte stream
+the WebUI would hand to `SourceBuffer.appendBuffer`, replayed in order and (by
+default) at the cadence the camera delivered it.
+
+Each fragment is preceded by a 32-byte `prft` (producer reference time) box, as
+the camera's live stream now carries before every `moof`; the boxes were laid
+into the existing recording offline, byte for byte as the camera writes them,
+because they do not depend on the picture. MSE is required to accept and ignore
+a top-level box it does not know, and this recording is what checks that Safari's
+does.
 
 To re-record or record a different configuration, point `tools/record.py` (the
 capture script) at any majestic camera's `/ws/video?stream=0`.
