@@ -48,6 +48,36 @@ because they do not depend on the picture. MSE is required to accept and ignore
 a top-level box it does not know, and this recording is what checks that Safari's
 does.
 
+`web/stream-1080.bin` is a second recording, the shape that
+[`majestic-webui#335`](https://github.com/OpenIPC/majestic-webui/issues/335)
+was reported on — **`hvc1.1.6.L123.B0`, 1920×1080, 30 fps, one keyframe per ~30
+frames with P-frames between, ~16 s** — captured from a lab gk7205v300 + imx335
+whose picture is an out-of-focus featureless field. Select it with
+`?stream=stream-1080`. The all-keyframe recording above decodes one independent
+frame at a time and so cannot exercise a fault that only shows *inside* a GOP;
+this one can, which is what #335 and its cold-start residual
+([`majestic-webui#460`](https://github.com/OpenIPC/majestic-webui/issues/460))
+turned out to be.
+
+**What it found — Safari's hardware HEVC/MSE decode is cadence-fragile, and the
+safe grouping of fragments into `appendBuffer` calls is decoder-specific.** On
+the Apple-silicon runners here, replaying `stream-1080`:
+
+| append grouping (`params`)        | macos-14 | macos-15            |
+|-----------------------------------|----------|---------------------|
+| one fragment each (`chunk=1`)     | clean    | **stalls ~1 s**     |
+| five at a time (`chunk=5`)        | clean    | clean               |
+| a whole GOP (`gop=1`)             | **fails**| **fails**           |
+
+The WebUI coalesces five (`APPEND_BATCH=5`), which is the value that clears both
+runners here; but on an **Intel** Mac's Safari the same five-fragment grouping
+is what faults (`MEDIA_ERR_DECODE`, #335's residual), and per-frame is the one
+that clears *it*. There is no single grouping that is safe on every decoder, so
+this harness guards the ends — a regression toward a whole-GOP append fails on
+every runner, and per-frame catches the macos-15 sensitivity — rather than
+proving one universal value. Reproducing the Intel-only residual needs an Intel
+Mac, which these hosted runners are not.
+
 To re-record or record a different configuration, point `tools/record.py` (the
 capture script) at any majestic camera's `/ws/video?stream=0`.
 
