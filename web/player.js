@@ -55,7 +55,7 @@
   }
 
   var man, buf, initSeg, frags = [], keyIdx = [];
-  var ms, sb, fragIdx = 0, playStart = 0;
+  var ms, sb, fragIdx = 0, playStart = 0, pacingOrigin = 0;
 
   R.mseSupported = ('MediaSource' in window);
   if (!R.mseSupported) { note('no MediaSource'); return finish(); }
@@ -114,6 +114,12 @@
 
   function setupMS(fromIdx) {
     fragIdx = fromIdx;
+    // Pacing is relative to where this (re)build starts, not to the head of the
+    // recording. A rebuild after a decode error resumes from a later keyframe,
+    // whose absolute arrivalMs is seconds in; pacing to that absolute value
+    // would stall the resumed picture for its whole stream age (and inflate the
+    // recovery metrics). Anchor the clock to the first fragment we replay.
+    pacingOrigin = (frags[fromIdx] && frags[fromIdx].arrivalMs) || 0;
     ms = new MediaSource();
     video.src = URL.createObjectURL(ms);
     ms.addEventListener('sourceopen', function () {
@@ -158,7 +164,7 @@
     if (window.__done) return;
     if (fragIdx >= frags.length) { try { ms.endOfStream(); } catch (e) {} return; }
     var ch = nextChunk();
-    var wait = paced ? Math.max(0, ch.lastArrival - (performance.now() - playStart)) : 0;
+    var wait = paced ? Math.max(0, (ch.lastArrival - pacingOrigin) - (performance.now() - playStart)) : 0;
     setTimeout(function () {
       if (window.__done) return;
       if (!sb || ms.readyState !== 'open') return;
