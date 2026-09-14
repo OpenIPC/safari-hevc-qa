@@ -1,0 +1,118 @@
+name: Timed metadata track in MSE
+
+# Does a browser's MediaSource tolerate an init segment that declares a `meta`
+# handler track it cannot decode?
+#
+# majestic wants to write detection boxes into its recordings as an ISO
+# 14496-12 timed metadata track, and the WebUI's recordings player appends
+# those very fragments to a MediaSource. "Browsers ignore tracks they do not
+# support" is the assumption the whole design rests on, and it is exactly the
+# kind of assumption that holds in one engine and not the next -- this
+# repository exists because Safari's MSE behaviour differs from Chrome's in
+# ways no amount of reading the specification predicts.
+#
+# EVERY RUN IS A PAIR. The control is the same recording without the metadata
+# track, replayed through the same page on the same runner; the test only has
+# to match its own control. Without that, a runner-specific HEVC quirk -- and
+# this repository's README documents several -- would read as a metadata-track
+# failure, and the fix would be applied to the wrong thing.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      params:
+        description: "extra query string for the harness (e.g. chunk=5, burst=1)"
+        required: false
+        default: ""
+
+jobs:
+  safari:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+        # h264 is synthetic and decodes in software everywhere, so it isolates
+        # the container question from the codec question. stream is the real
+        # H.265 recording, which is what the recordings player actually meets.
+        stream: [h264, stream]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Safari version
+        run: |
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+          sw_vers || true
+
+      - name: Build the metadata-track variant
+        run: |
+          python3 tools/inject-meta-track.py \
+            web/${{ matrix.stream }}.bin web/${{ matrix.stream }}-meta.bin
+
+      - name: Enable Safari WebDriver
+        run: sudo safaridriver --enable
+
+      - name: Install Selenium
+        run: |
+          python3 -m venv venv
+          ./venv/bin/python -m pip install --upgrade pip
+          ./venv/bin/python -m pip install 'selenium>=4.20'
+
+      - name: Serve the harness
+        run: |
+          cd web
+          python3 -m http.server 8000 &
+          echo $! > /tmp/httpd.pid
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:8000/mse-hevc.html >/dev/null && break || sleep 0.5
+          done
+
+      - name: Control - the same recording with no metadata track
+        id: control
+        continue-on-error: true
+        run: |
+          Q="stream=${{ matrix.stream }}&ms=20000&noreinit=1${{ github.event.inputs.params && format('&{0}', github.event.inputs.params) || '' }}"
+          ./venv/bin/python run.py "http://localhost:8000/mse-hevc.html?$Q" 120
+          mv result.json control.json
+
+      - name: Test - the same recording WITH a metadata track
+        id: test
+        continue-on-error: true
+        run: |
+          Q="stream=${{ matrix.stream }}-meta&ms=20000&noreinit=1${{ github.event.inputs.params && format('&{0}', github.event.inputs.params) || '' }}"
+          ./venv/bin/python run.py "http://localhost:8000/mse-hevc.html?$Q" 120
+          mv result.json test.json
+
+      - name: Upload traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meta-track-${{ matrix.os }}-${{ matrix.stream }}
+          path: |
+            control.json
+            test.json
+          if-no-files-found: warn
+
+      - name: The test must do no worse than its control
+        run: |
+          C="${{ steps.control.outcome }}"
+          T="${{ steps.test.outcome }}"
+          echo "control=$C test=$T"
+          if [ "$C" != "success" ]; then
+            echo "::warning::The control itself did not play cleanly on"\
+                 "${{ matrix.os }}/${{ matrix.stream }}. This runner cannot"\
+                 "answer the metadata-track question either way; the result is"\
+                 "inconclusive rather than negative."
+            test "$T" = "$C"
+            exit $?
+          fi
+          if [ "$T" != "success" ]; then
+            echo "::error::The metadata track broke playback on"\
+                 "${{ matrix.os }}/${{ matrix.stream }}, where the same"\
+                 "recording without it played cleanly. The camera must not"\
+                 "write this track into files this player reads."
+            exit 1
+          fi
+          echo "A meta/mett track is tolerated on ${{ matrix.os }} with ${{ matrix.stream }}."

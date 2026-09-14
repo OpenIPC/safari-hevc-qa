@@ -81,6 +81,51 @@ Mac, which these hosted runners are not.
 To re-record or record a different configuration, point `tools/record.py` (the
 capture script) at any majestic camera's `/ws/video?stream=0`.
 
+## The timed-metadata track probe
+
+A second question this harness answers, on the same runners and with the same
+page: **does MediaSource tolerate an init segment that declares a `meta`
+handler track it cannot decode?**
+
+majestic wants to write detection boxes into its recordings as an ISO/IEC
+14496-12 timed metadata track, and the WebUI's recordings player appends those
+very fragments to a `MediaSource`. "Browsers ignore tracks they do not
+support" is the assumption that whole design rests on, and it is exactly the
+kind of assumption that holds in one engine and not the next — which is why
+this repository exists at all.
+
+`tools/inject-meta-track.py` adds the track to an existing recording offline,
+byte for byte as the camera would write it, the same way the `prft` boxes in
+`web/stream.bin` were laid in: the bytes do not depend on the picture, so no
+new footage has to be recorded or published to ask the question.
+
+```sh
+python3 tools/inject-meta-track.py web/stream.bin web/stream-meta.bin
+# then open mse-hevc.html?stream=stream-meta
+```
+
+It writes a `meta`/`nmhd` track whose sample entry is `mett` with
+`mime_format: application/json`, a matching `trex`, and one `traf` per moof
+carrying a single sample appended to that fragment's existing `mdat`. Track
+order is video first, metadata last, in both the `moov` and every `moof`.
+
+**Every run is a pair.** The control is the same recording *without* the
+track, replayed through the same page on the same runner, and the test only
+has to match its own control. Without that, the runner-specific HEVC quirks
+documented above would read as a metadata-track failure and the fix would be
+applied to the wrong thing. A control that does not play cleanly makes the run
+*inconclusive*, not negative.
+
+`web/h264.bin` is a synthetic ffmpeg `testsrc` clip — no camera footage in it
+at all — carried so the container question can be asked without the codec
+question riding along. It decodes in software in every browser.
+
+**Measured so far.** Chrome 137 on Linux, control and test through the same
+page: `addSourceBuffer` ok, init appended, forty fragments appended, two
+seconds buffered, **40 frames decoded and 0 dropped in both** — identical in
+every field. The Safari half runs on the macOS runners via the *Timed metadata
+track in MSE* workflow.
+
 ## What it measures
 
 The page plays the stream through MSE and watches, once per frame:
