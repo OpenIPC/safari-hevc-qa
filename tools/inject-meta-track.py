@@ -83,9 +83,20 @@ def mett_sample_entry() -> bytes:
     payload += MIME + b'\x00'             # mime_format
     return box(b'mett', payload)
 
-def meta_trak(timescale: int, duration: int) -> bytes:
+def meta_trak(timescale: int) -> bytes:
+    # DURATION IS ZERO, in both tkhd and mdhd, because this is a fragmented
+    # file: the duration is not known until the fragments are, and every other
+    # track in these recordings says 0 for the same reason.
+    #
+    # Writing a real number here is what made Safari on macos-14 refuse the
+    # whole stream with MEDIA_ERR_DECODE at t=0. Two mistakes at once, and the
+    # second is the instructive one: tkhd.duration is in the MOVIE timescale
+    # (mvhd, 1000 in both these recordings) while mdhd.duration is in the
+    # MEDIA timescale (10240 and 1000000). Putting media ticks in the tkhd
+    # declared a 61-second metadata track on a 6-second movie. Chrome played
+    # it anyway; Safari did not, and Safari was right.
     tkhd = full_box(b'tkhd', 0, 0x000003,  # enabled | in_movie, NOT in_preview
-        struct.pack('>IIIII', 0, 0, META_TRACK_ID, 0, duration)
+        struct.pack('>IIIII', 0, 0, META_TRACK_ID, 0, 0)
         + b'\x00' * 8                      # reserved
         + struct.pack('>hhhh', 0, 0, 0, 0) # layer, alt group, volume, reserved
         + struct.pack('>9i', 0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000)
@@ -93,7 +104,7 @@ def meta_trak(timescale: int, duration: int) -> bytes:
                                            # has no picture
 
     mdhd = full_box(b'mdhd', 0, 0,
-        struct.pack('>IIII', 0, 0, timescale, duration)
+        struct.pack('>IIII', 0, 0, timescale, 0)
         + struct.pack('>HH', 0x55C4, 0))   # 'und', pre_defined
 
     # handler_type 'meta' -- ISO/IEC 14496-12 12.3.2. Not the MetaBox that
@@ -145,7 +156,7 @@ def meta_traf(decode_time: int, duration: int, sample: bytes,
 
 # --- rewriting -----------------------------------------------------------
 
-def patch_init(init: bytes, timescale: int, duration: int) -> bytes:
+def patch_init(init: bytes, timescale: int) -> bytes:
     buf = bytearray(init)
     moov_s, moov_e = find(buf, 0, len(buf), b'moov')
 
@@ -155,7 +166,7 @@ def patch_init(init: bytes, timescale: int, duration: int) -> bytes:
 
     mvex_s, mvex_e = find(buf, moov_s + 8, moov_e, b'mvex')
 
-    trak = meta_trak(timescale, duration)
+    trak = meta_trak(timescale)
     trex = meta_trex()
 
     # The trak goes before mvex, the trex inside it. Track order in the moov
@@ -254,8 +265,7 @@ def main():
     duration = frags[1]['dts'] - frags[0]['dts'] if len(frags) > 1 else 50000
 
     out = bytearray()
-    out += patch_init(data[:manifest['initLength']], timescale,
-                      frags[-1]['dts'] + duration)
+    out += patch_init(data[:manifest['initLength']], timescale)
     new_init_len = len(out)
 
     new_frags = []

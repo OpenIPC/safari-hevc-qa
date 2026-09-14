@@ -120,8 +120,22 @@ applied to the wrong thing. A control that does not play cleanly makes the run
 at all — carried so the container question can be asked without the codec
 question riding along. It decodes in software in every browser.
 
-**Measured so far.** Chrome 137 on Linux, control and test through the same
-page: `addSourceBuffer` ok, init appended, forty fragments appended, two
+**What it caught, on its first run.** The injected track carried a real
+`duration` in its `tkhd` and `mdhd`. Both are wrong in a fragmented file —
+every other track in these recordings says 0, because the duration is not
+known until the fragments are — and the first is wrong twice over:
+`tkhd.duration` is in the **movie** timescale (`mvhd`, 1000 in both these
+recordings) while `mdhd.duration` is in the **media** timescale (10240 and
+1000000). Media ticks in the `tkhd` declared a 61-second metadata track on a
+6-second movie.
+
+Chrome played it anyway, decoding every frame with no error. **Safari on
+macos-14 refused the whole stream with `MEDIA_ERR_DECODE` at t=0**, and Safari
+was right. That is the entire argument for this repository existing, and for
+asking the question before the muxer was written rather than after.
+
+**Measured after the fix.** Chrome 137 on Linux, control and test through the
+same page: `addSourceBuffer` ok, init appended, forty fragments appended, two
 seconds buffered, **40 frames decoded and 0 dropped in both** — identical in
 every field. The Safari half runs on the macOS runners via the *Timed metadata
 track in MSE* workflow.
