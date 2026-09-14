@@ -42,10 +42,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-14, macos-15]
-        # h264 is synthetic and decodes in software everywhere, so it isolates
-        # the container question from the codec question. stream is the real
-        # H.265 recording, which is what the recordings player actually meets.
-        stream: [h264, stream]
+        # Three fixtures, and the third exists because the first two
+        # disagreed. h264 and h265 are synthetic ffmpeg clips differing only
+        # in codec; stream is a real majestic H.265 recording. Between them
+        # they separate "Safari dislikes this on H.264" from "Safari dislikes
+        # this in an ffmpeg-written file", which a run on h264 and stream
+        # alone cannot.
+        stream: [h264, h265, stream]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
