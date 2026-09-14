@@ -63,6 +63,15 @@ jobs:
           python3 tools/inject-meta-track.py \
             web/${{ matrix.stream }}.bin web/${{ matrix.stream }}-meta.bin
 
+      # Before asking a browser anything: does the track come back out
+      # cleanly? Two implementations in two languages have to agree on real
+      # files, and "it plays" is a weaker statement than "it is the same
+      # bytes" — a container can be malformed in ways every decoder tolerates
+      # until one does not, which is what this harness found the first time
+      # it asked.
+      - name: The track comes back out byte for byte
+        run: node tools/roundtrip.mjs ${{ matrix.stream }}
+
       - name: Enable Safari WebDriver
         run: sudo safaridriver --enable
 
@@ -97,6 +106,19 @@ jobs:
           ./venv/bin/python run.py "http://localhost:8000/mse-hevc.html?$Q" 120
           mv result.json test.json
 
+      # And the workaround, exercised in the browser that refuses the file.
+      # Safari 26.6 on macOS 15 rejects the metadata track alongside H.264;
+      # the WebUI's player removes it on the way in, so this must play where
+      # the step above it may not. Run always, because a workaround that only
+      # works where it is not needed is not one.
+      - name: Test with the WebUI's stripper in front of it
+        id: stripped
+        continue-on-error: true
+        run: |
+          Q="stream=${{ matrix.stream }}-meta&strip=1&ms=20000&noreinit=1"
+          ./venv/bin/python run.py "http://localhost:8000/mse-hevc.html?$Q" 120
+          mv result.json stripped.json
+
       - name: Upload traces
         if: always()
         uses: actions/upload-artifact@v4
@@ -105,6 +127,7 @@ jobs:
           path: |
             control.json
             test.json
+            stripped.json
           if-no-files-found: warn
 
       - name: The test must do no worse than its control
@@ -120,11 +143,23 @@ jobs:
             test "$T" = "$C"
             exit $?
           fi
-          if [ "$T" != "success" ]; then
-            echo "::error::The metadata track broke playback on"\
-                 "${{ matrix.os }}/${{ matrix.stream }}, where the same"\
-                 "recording without it played cleanly. The camera must not"\
-                 "write this track into files this player reads."
+          S="${{ steps.stripped.outcome }}"
+          echo "stripped=$S"
+          if [ "$S" != "success" ]; then
+            echo "::error::The WebUI's stripper did not produce a playable"\
+                 "file on ${{ matrix.os }}/${{ matrix.stream }}. That is the"\
+                 "workaround failing, and it is worse than the track being"\
+                 "refused: a player that removes the track and still cannot"\
+                 "play has corrupted the recording."
             exit 1
           fi
-          echo "A meta/mett track is tolerated on ${{ matrix.os }} with ${{ matrix.stream }}."
+          if [ "$T" != "success" ]; then
+            echo "::notice::The metadata track is refused on"\
+                 "${{ matrix.os }}/${{ matrix.stream }} — known of Safari 26.6"\
+                 "with H.264 — and the stripper is what makes such a"\
+                 "recording playable there. Not a failure: it is the reason"\
+                 "the stripper exists."
+            exit 0
+          fi
+          echo "A meta/mett track is tolerated on ${{ matrix.os }} with ${{ matrix.stream }},"\
+               "and survives the stripper either way."

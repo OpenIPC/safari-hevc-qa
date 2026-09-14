@@ -135,10 +135,46 @@ was right. That is the entire argument for this repository existing, and for
 asking the question before the muxer was written rather than after.
 
 **Measured after the fix.** Chrome 137 on Linux, control and test through the
-same page: `addSourceBuffer` ok, init appended, forty fragments appended, two
-seconds buffered, **40 frames decoded and 0 dropped in both** — identical in
-every field. The Safari half runs on the macOS runners via the *Timed metadata
-track in MSE* workflow.
+same page: forty fragments appended, two seconds buffered, **40 frames decoded
+and 0 dropped in both** — identical in every field.
+
+And on the macOS runners:
+
+| runner | h264 (ffmpeg) | h265 (ffmpeg) | stream (majestic H.265) |
+|---|---|---|---|
+| macos-14 | pass | pass | pass |
+| macos-15 | **fail** | pass | pass |
+
+macos-15 is Safari 26.6.1, and the failure is `MEDIA_ERR_DECODE` at t=0 with
+nothing played of a six-second stream that plays clean without the track.
+
+`h265` is why that table can be read at all. The first run had only `h264` and
+`stream`, which differ in codec **and** in provenance at once, so "Safari
+dislikes this on H.264" and "Safari dislikes this in an ffmpeg-written file"
+both fitted. `h265` comes from the same ffmpeg invocation as `h264` with only
+`-c:v libx265` changed, holding provenance fixed — and it passes. **It is the
+codec.** Safari 26.6 refuses a timed-metadata track alongside H.264 and
+accepts the identical track alongside H.265.
+
+That matters because majestic records H.264 by default on most cameras.
+
+## Taking the track back out
+
+So the WebUI's recordings player removes it on the way in, and this harness
+checks that two ways.
+
+`tools/roundtrip.mjs` asks the stronger question: **strip(inject(recording))
+must be the recording**, byte for byte. Two implementations written
+independently in two languages have to agree on real files — 661 fragments
+across the three fixtures, all identical, and the init identical but for
+`next_track_ID`, which is left high on purpose (it only has to *exceed* every
+id in use, and majestic writes the same number whether or not the track is
+there).
+
+`?strip=1` runs the player's own remover before appending, so the workaround
+is exercised in the browser that refuses the file without it. `web/mp4meta.js`
+is a copy of majestic-webui's `www/a/mp4meta.js`; what runs here proves the
+idea, and the round-trip proves the copy still behaves like the original.
 
 ## What it measures
 
