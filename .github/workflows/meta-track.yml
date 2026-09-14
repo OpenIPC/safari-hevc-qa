@@ -20,6 +20,15 @@ name: Timed metadata track in MSE
 on:
   push:
     branches: [master]
+  # On pull requests too, unlike the HEVC workflow beside it. This one is a
+  # gate on a format decision rather than a periodic health check: the answer
+  # is wanted while the change that depends on it is still open, and after it
+  # has merged there is nothing left to decide.
+  pull_request:
+    paths:
+      - "tools/inject-meta-track.py"
+      - "web/**"
+      - ".github/workflows/meta-track.yml"
   workflow_dispatch:
     inputs:
       params:
