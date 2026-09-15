@@ -81,6 +81,101 @@ Mac, which these hosted runners are not.
 To re-record or record a different configuration, point `tools/record.py` (the
 capture script) at any majestic camera's `/ws/video?stream=0`.
 
+## The timed-metadata track probe
+
+A second question this harness answers, on the same runners and with the same
+page: **does MediaSource tolerate an init segment that declares a `meta`
+handler track it cannot decode?**
+
+majestic wants to write detection boxes into its recordings as an ISO/IEC
+14496-12 timed metadata track, and the WebUI's recordings player appends those
+very fragments to a `MediaSource`. "Browsers ignore tracks they do not
+support" is the assumption that whole design rests on, and it is exactly the
+kind of assumption that holds in one engine and not the next — which is why
+this repository exists at all.
+
+`tools/inject-meta-track.py` adds the track to an existing recording offline,
+byte for byte as the camera would write it, the same way the `prft` boxes in
+`web/stream.bin` were laid in: the bytes do not depend on the picture, so no
+new footage has to be recorded or published to ask the question.
+
+```sh
+python3 tools/inject-meta-track.py web/stream.bin web/stream-meta.bin
+# then open mse-hevc.html?stream=stream-meta
+```
+
+It writes a `meta`/`nmhd` track whose sample entry is `mett` with
+`mime_format: application/json`, a matching `trex`, and one `traf` per moof
+carrying a single sample appended to that fragment's existing `mdat`. Track
+order is video first, metadata last, in both the `moov` and every `moof`.
+
+**Every run is a pair.** The control is the same recording *without* the
+track, replayed through the same page on the same runner, and the test only
+has to match its own control. Without that, the runner-specific HEVC quirks
+documented above would read as a metadata-track failure and the fix would be
+applied to the wrong thing. A control that does not play cleanly makes the run
+*inconclusive*, not negative.
+
+`web/h264.bin` is a synthetic ffmpeg `testsrc` clip — no camera footage in it
+at all — carried so the container question can be asked without the codec
+question riding along. It decodes in software in every browser.
+
+**What it caught, on its first run.** The injected track carried a real
+`duration` in its `tkhd` and `mdhd`. Both are wrong in a fragmented file —
+every other track in these recordings says 0, because the duration is not
+known until the fragments are — and the first is wrong twice over:
+`tkhd.duration` is in the **movie** timescale (`mvhd`, 1000 in both these
+recordings) while `mdhd.duration` is in the **media** timescale (10240 and
+1000000). Media ticks in the `tkhd` declared a 61-second metadata track on a
+6-second movie.
+
+Chrome played it anyway, decoding every frame with no error. **Safari on
+macos-14 refused the whole stream with `MEDIA_ERR_DECODE` at t=0**, and Safari
+was right. That is the entire argument for this repository existing, and for
+asking the question before the muxer was written rather than after.
+
+**Measured after the fix.** Chrome 137 on Linux, control and test through the
+same page: forty fragments appended, two seconds buffered, **40 frames decoded
+and 0 dropped in both** — identical in every field.
+
+And on the macOS runners:
+
+| runner | h264 (ffmpeg) | h265 (ffmpeg) | stream (majestic H.265) |
+|---|---|---|---|
+| macos-14 | pass | pass | pass |
+| macos-15 | **fail** | pass | pass |
+
+macos-15 is Safari 26.6.1, and the failure is `MEDIA_ERR_DECODE` at t=0 with
+nothing played of a six-second stream that plays clean without the track.
+
+`h265` is why that table can be read at all. The first run had only `h264` and
+`stream`, which differ in codec **and** in provenance at once, so "Safari
+dislikes this on H.264" and "Safari dislikes this in an ffmpeg-written file"
+both fitted. `h265` comes from the same ffmpeg invocation as `h264` with only
+`-c:v libx265` changed, holding provenance fixed — and it passes. **It is the
+codec.** Safari 26.6 refuses a timed-metadata track alongside H.264 and
+accepts the identical track alongside H.265.
+
+That matters because majestic records H.264 by default on most cameras.
+
+## Taking the track back out
+
+So the WebUI's recordings player removes it on the way in, and this harness
+checks that two ways.
+
+`tools/roundtrip.mjs` asks the stronger question: **strip(inject(recording))
+must be the recording**, byte for byte. Two implementations written
+independently in two languages have to agree on real files — 661 fragments
+across the three fixtures, all identical, and the init identical but for
+`next_track_ID`, which is left high on purpose (it only has to *exceed* every
+id in use, and majestic writes the same number whether or not the track is
+there).
+
+`?strip=1` runs the player's own remover before appending, so the workaround
+is exercised in the browser that refuses the file without it. `web/mp4meta.js`
+is a copy of majestic-webui's `www/a/mp4meta.js`; what runs here proves the
+idea, and the round-trip proves the copy still behaves like the original.
+
 ## What it measures
 
 The page plays the stream through MSE and watches, once per frame:

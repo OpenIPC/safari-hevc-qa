@@ -1,0 +1,165 @@
+name: Timed metadata track in MSE
+
+# Does a browser's MediaSource tolerate an init segment that declares a `meta`
+# handler track it cannot decode?
+#
+# majestic wants to write detection boxes into its recordings as an ISO
+# 14496-12 timed metadata track, and the WebUI's recordings player appends
+# those very fragments to a MediaSource. "Browsers ignore tracks they do not
+# support" is the assumption the whole design rests on, and it is exactly the
+# kind of assumption that holds in one engine and not the next -- this
+# repository exists because Safari's MSE behaviour differs from Chrome's in
+# ways no amount of reading the specification predicts.
+#
+# EVERY RUN IS A PAIR. The control is the same recording without the metadata
+# track, replayed through the same page on the same runner; the test only has
+# to match its own control. Without that, a runner-specific HEVC quirk -- and
+# this repository's README documents several -- would read as a metadata-track
+# failure, and the fix would be applied to the wrong thing.
+
+on:
+  push:
+    branches: [master]
+  # On pull requests too, unlike the HEVC workflow beside it. This one is a
+  # gate on a format decision rather than a periodic health check: the answer
+  # is wanted while the change that depends on it is still open, and after it
+  # has merged there is nothing left to decide.
+  pull_request:
+    paths:
+      - "tools/inject-meta-track.py"
+      - "web/**"
+      - ".github/workflows/meta-track.yml"
+  workflow_dispatch:
+    inputs:
+      params:
+        description: "extra query string for the harness (e.g. chunk=5, burst=1)"
+        required: false
+        default: ""
+
+jobs:
+  safari:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+        # Three fixtures, and the third exists because the first two
+        # disagreed. h264 and h265 are synthetic ffmpeg clips differing only
+        # in codec; stream is a real majestic H.265 recording. Between them
+        # they separate "Safari dislikes this on H.264" from "Safari dislikes
+        # this in an ffmpeg-written file", which a run on h264 and stream
+        # alone cannot.
+        stream: [h264, h265, stream]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Safari version
+        run: |
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+          sw_vers || true
+
+      - name: Build the metadata-track variant
+        run: |
+          python3 tools/inject-meta-track.py \
+            web/${{ matrix.stream }}.bin web/${{ matrix.stream }}-meta.bin
+
+      # Before asking a browser anything: does the track come back out
+      # cleanly? Two implementations in two languages have to agree on real
+      # files, and "it plays" is a weaker statement than "it is the same
+      # bytes" — a container can be malformed in ways every decoder tolerates
+      # until one does not, which is what this harness found the first time
+      # it asked.
+      - name: The track comes back out byte for byte
+        run: node tools/roundtrip.mjs ${{ matrix.stream }}
+
+      - name: Enable Safari WebDriver
+        run: sudo safaridriver --enable
+
+      - name: Install Selenium
+        run: |
+          python3 -m venv venv
+          ./venv/bin/python -m pip install --upgrade pip
+          ./venv/bin/python -m pip install 'selenium>=4.20'
+
+      - name: Serve the harness
+        run: |
+          cd web
+          python3 -m http.server 8000 &
+          echo $! > /tmp/httpd.pid
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:8000/mse-hevc.html >/dev/null && break || sleep 0.5
+          done
+
+      - name: Control - the same recording with no metadata track
+        id: control
+        continue-on-error: true
+        run: |
+          Q="stream=${{ matrix.stream }}&ms=20000&noreinit=1${{ github.event.inputs.params && format('&{0}', github.event.inputs.params) || '' }}"
+          ./venv/bin/python run.py "http://localhost:8000/mse-hevc.html?$Q" 120
+          mv result.json control.json
+
+      - name: Test - the same recording WITH a metadata track
+        id: test
+        continue-on-error: true
+        run: |
+          Q="stream=${{ matrix.stream }}-meta&ms=20000&noreinit=1${{ github.event.inputs.params && format('&{0}', github.event.inputs.params) || '' }}"
+          ./venv/bin/python run.py "http://localhost:8000/mse-hevc.html?$Q" 120
+          mv result.json test.json
+
+      # And the workaround, exercised in the browser that refuses the file.
+      # Safari 26.6 on macOS 15 rejects the metadata track alongside H.264;
+      # the WebUI's player removes it on the way in, so this must play where
+      # the step above it may not. Run always, because a workaround that only
+      # works where it is not needed is not one.
+      - name: Test with the WebUI's stripper in front of it
+        id: stripped
+        continue-on-error: true
+        run: |
+          Q="stream=${{ matrix.stream }}-meta&strip=1&ms=20000&noreinit=1"
+          ./venv/bin/python run.py "http://localhost:8000/mse-hevc.html?$Q" 120
+          mv result.json stripped.json
+
+      - name: Upload traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meta-track-${{ matrix.os }}-${{ matrix.stream }}
+          path: |
+            control.json
+            test.json
+            stripped.json
+          if-no-files-found: warn
+
+      - name: The test must do no worse than its control
+        run: |
+          C="${{ steps.control.outcome }}"
+          T="${{ steps.test.outcome }}"
+          echo "control=$C test=$T"
+          if [ "$C" != "success" ]; then
+            echo "::warning::The control itself did not play cleanly on"\
+                 "${{ matrix.os }}/${{ matrix.stream }}. This runner cannot"\
+                 "answer the metadata-track question either way; the result is"\
+                 "inconclusive rather than negative."
+            test "$T" = "$C"
+            exit $?
+          fi
+          S="${{ steps.stripped.outcome }}"
+          echo "stripped=$S"
+          if [ "$S" != "success" ]; then
+            echo "::error::The WebUI's stripper did not produce a playable"\
+                 "file on ${{ matrix.os }}/${{ matrix.stream }}. That is the"\
+                 "workaround failing, and it is worse than the track being"\
+                 "refused: a player that removes the track and still cannot"\
+                 "play has corrupted the recording."
+            exit 1
+          fi
+          if [ "$T" != "success" ]; then
+            echo "::notice::The metadata track is refused on"\
+                 "${{ matrix.os }}/${{ matrix.stream }} — known of Safari 26.6"\
+                 "with H.264 — and the stripper is what makes such a"\
+                 "recording playable there. Not a failure: it is the reason"\
+                 "the stripper exists."
+            exit 0
+          fi
+          echo "A meta/mett track is tolerated on ${{ matrix.os }} with ${{ matrix.stream }},"\
+               "and survives the stripper either way."

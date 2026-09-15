@@ -13,6 +13,7 @@
 //   burst=1      append as fast as possible instead of at recorded cadence
 //   noreinit=1   do NOT rebuild MediaSource on a decode error (bare decode test)
 //   stream=<b>   base name of the recording      (default "stream")
+//   strip=1      remove the analytics metadata track before appending
 //
 // The verdict lands on window.__result and the title becomes "DONE" when the
 // run ends, which is what run.py polls.
@@ -25,6 +26,7 @@
   var base = q.get('stream') || 'stream';
   var chunkN = Math.max(1, +(q.get('chunk') || 1));  // fragments per appendBuffer
   var gopChunk = !!q.get('gop');                      // or coalesce a whole GOP
+  var strip = !!q.get('strip');       // remove the analytics metadata track
 
   var R = {
     ua: navigator.userAgent, codec: null, paced: paced, reinit: reinit,
@@ -69,11 +71,25 @@
     return fetch(base + '.bin').then(function (r) { return r.arrayBuffer(); });
   }).then(function (ab) {
     buf = ab;
-    initSeg = buf.slice(0, man.initLength);
+    // strip=1 runs the WebUI's own analytics-metadata remover over the
+    // recording on the way in — the workaround, exercised in the browser that
+    // refuses the file without it. web/mp4meta.js is a copy of
+    // majestic-webui's www/a/mp4meta.js; what is proved here is the idea, and
+    // tools/roundtrip.mjs proves the copy still behaves like the original.
+    var META = strip && window.MajesticMp4Meta;
+    var bytes = function (a, b) {
+      return buf.slice(a, b);
+    };
+    initSeg = META
+      ? META.stripInit(new Uint8Array(bytes(0, man.initLength))).buffer
+      : bytes(0, man.initLength);
     man.fragments.forEach(function (f, i) {
-      frags.push({ data: buf.slice(f.offset, f.offset + f.length), arrivalMs: f.arrivalMs, key: !!f.key });
+      var d = bytes(f.offset, f.offset + f.length);
+      if (META) d = META.stripFragment(new Uint8Array(d)).buffer;
+      frags.push({ data: d, arrivalMs: f.arrivalMs, key: !!f.key });
       if (f.key) keyIdx.push(i);
     });
+    R.stripped = !!META;
     R.streamSeconds = frags.length ? frags[frags.length - 1].arrivalMs / 1000 : 0;
     start();
   }).catch(function (e) { note('load-fail:' + e); finish(); });
