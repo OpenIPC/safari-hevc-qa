@@ -48,11 +48,13 @@ def main():
             "const t0 = Date.now();"
             "(function wait() {"
             "  if (window.__shareReady || window.__shareError || Date.now() - t0 > limit * 1000) {"
+            "    const r = {ready: !!window.__shareReady, error: window.__shareError || null, trace: []};"
             "    const s = document.querySelector('script[type=module]');"
-            "    import(new URL('./diag.js', s.src).href).then((m) => done({"
-            "      ready: !!window.__shareReady, error: window.__shareError || null,"
-            "      trace: m.report().split('\\n').filter((l) => /selected pair|WELCOME|one round trip|CHALLENGE|shown to the guest/.test(l)).map((l) => l.trim()),"
-            "    }), (e) => done({ready: !!window.__shareReady, error: String(e)}));"
+            "    if (!s) { r.diag = 'no share page module on ' + location.href; done(r); return; }"
+            "    import(new URL('./diag.js', s.src).href).then((m) => {"
+            "      r.trace = m.report().split('\\n').filter((l) => /selected pair|WELCOME|one round trip|CHALLENGE|shown to the guest/.test(l)).map((l) => l.trim());"
+            "      done(r);"
+            "    }, (e) => { r.diag = String(e); done(r); });"
             "  } else setTimeout(wait, 200);"
             "})();",
             TIMEOUT)
@@ -65,10 +67,18 @@ def main():
     print(json.dumps(out))
     print(ua)
     if out.get("ready"):
-        how = "one round trip" if any("one round trip" in l for l in out.get("trace", [])) else "challenge"
+        # Name the handshake only from the page's own trace; without the
+        # trace the camera's admission is still proven, its route is not.
+        trace = out.get("trace") or []
+        if any("one round trip" in l for l in trace):
+            how = "one round trip"
+        elif any("CHALLENGE" in l for l in trace):
+            how = "challenge"
+        else:
+            how = "handshake unknown: %s" % (out.get("diag") or "no handshake line in the trace")
         print("PASS: Safari admitted to the shared camera (%s)" % how)
         return 0
-    print("FAIL: not admitted: %s" % out.get("error"))
+    print("FAIL: not admitted: %s" % (out.get("error") or out.get("diag") or "timed out"))
     return 1
 
 
