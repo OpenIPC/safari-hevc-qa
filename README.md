@@ -28,6 +28,8 @@ web/stream.bin      a recorded fMP4 HEVC stream (init segment + one fragment/fra
 web/stream.json     manifest: codec string, per-fragment offset/length/dts/arrival/key
 run.py              drives real Safari via safaridriver, prints the verdict
 .github/workflows/safari-hevc.yml   runs it on macos-14 and macos-15
+run-share.py        opens a camera share link in Safari, reports whether the camera admits it
+.github/workflows/safari-share.yml  runs it on macos-15 (the link is the SHARE_LINK secret)
 ```
 
 ### The recording

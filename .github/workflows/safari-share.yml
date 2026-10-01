@@ -1,0 +1,37 @@
+name: Safari share link
+
+# A camera share link opened in real Safari on a hosted macOS runner, as a
+# guest would open it: run-share.py waits for the camera to admit the page and
+# prints how -- the selected ICE pair and the handshake. The link carries the
+# share's secret, so it is the SHARE_LINK repository secret, never an input;
+# set it to a short-lived, view-scoped share just before a run and end the
+# share afterwards.
+
+on:
+  workflow_dispatch:
+    inputs:
+      timeout:
+        description: "seconds to wait for the camera to admit the page"
+        required: false
+        default: "60"
+
+jobs:
+  share:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Safari version
+        run: defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+      - name: Enable Safari WebDriver
+        run: sudo safaridriver --enable
+      - name: Selenium
+        run: |
+          python3 -m venv venv
+          ./venv/bin/python -m pip install --upgrade pip
+          ./venv/bin/python -m pip install 'selenium>=4.20'
+      - name: Drive Safari
+        env:
+          SHARE_LINK: ${{ secrets.SHARE_LINK }}
+          TIMEOUT: ${{ github.event.inputs.timeout }}
+        run: ./venv/bin/python run-share.py "$TIMEOUT"
